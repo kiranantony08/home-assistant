@@ -60,7 +60,6 @@ def config_from_file(filename, config=None):
             return {}
 
 
-# pylint: disable=abstract-method
 def setup_platform(hass, config, add_devices_callback, discovery_info=None):
     """Setup the Plex platform."""
     config = config_from_file(hass.config.path(PLEX_CONFIG_FILE))
@@ -83,7 +82,6 @@ def setup_platform(hass, config, add_devices_callback, discovery_info=None):
     setup_plexserver(host, token, hass, add_devices_callback)
 
 
-# pylint: disable=too-many-branches
 def setup_plexserver(host, token, hass, add_devices_callback):
     """Setup a plexserver based on host parameter."""
     import plexapi.server
@@ -192,7 +190,7 @@ def request_configuration(host, hass, add_devices_callback):
 class PlexClient(MediaPlayerDevice):
     """Representation of a Plex device."""
 
-    # pylint: disable=too-many-public-methods, attribute-defined-outside-init
+    # pylint: disable=attribute-defined-outside-init
     def __init__(self, device, plex_sessions, update_devices, update_sessions):
         """Initialize the Plex device."""
         from plexapi.utils import NA
@@ -202,6 +200,7 @@ class PlexClient(MediaPlayerDevice):
         self.update_devices = update_devices
         self.update_sessions = update_sessions
         self.set_device(device)
+        self._season = None
 
     def set_device(self, device):
         """Set the device property."""
@@ -242,8 +241,14 @@ class PlexClient(MediaPlayerDevice):
 
     def update(self):
         """Get the latest details."""
+        from plexapi.video import Show
+
         self.update_devices(no_throttle=True)
         self.update_sessions(no_throttle=True)
+
+        if isinstance(self.session, Show):
+            self._season = self._convert_na_to_none(
+                self.session.seasons()[0].index)
 
     # pylint: disable=no-self-use, singleton-comparison
     def _convert_na_to_none(self, value):
@@ -312,9 +317,7 @@ class PlexClient(MediaPlayerDevice):
     @property
     def media_season(self):
         """Season of curent playing media (TV Show only)."""
-        from plexapi.video import Show
-        if isinstance(self.session, Show):
-            return self._convert_na_to_none(self.session.seasons()[0].index)
+        return self._season
 
     @property
     def media_series_title(self):

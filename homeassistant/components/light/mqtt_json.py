@@ -85,7 +85,6 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
 class MqttJson(Light):
     """Representation of a MQTT JSON light."""
 
-    # pylint: disable=too-many-arguments,too-many-instance-attributes
     def __init__(self, hass, name, topic, qos, retain,
                  optimistic, brightness, rgb, flash_times):
         """Initialize MQTT JSON light."""
@@ -217,7 +216,7 @@ class MqttJson(Light):
             should_update = True
 
         if should_update:
-            self.update_ha_state()
+            self.schedule_update_ha_state()
 
     def turn_off(self, **kwargs):
         """Turn the device off."""
@@ -232,4 +231,4 @@ class MqttJson(Light):
         if self._optimistic:
             # Optimistically assume that the light has changed state.
             self._state = False
-            self.update_ha_state()
+            self.schedule_update_ha_state()

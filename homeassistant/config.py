@@ -93,6 +93,7 @@ def _valid_customize(value):
 
     return value
 
+
 CORE_CONFIG_SCHEMA = vol.Schema({
     CONF_NAME: vol.Coerce(str),
     CONF_LATITUDE: cv.latitude,
@@ -133,6 +134,7 @@ def create_default_config(config_dir, detect_location=True):
     """Create a default configuration file in given configuration directory.
 
     Return path to new config file if success, None if failed.
+    This method needs to run in an executor.
     """
     config_path = os.path.join(config_dir, YAML_CONFIG_FILE)
     version_path = os.path.join(config_dir, VERSION_FILE)
@@ -200,14 +202,20 @@ def async_hass_config_yaml(hass):
 
 
 def find_config_file(config_dir):
-    """Look in given directory for supported configuration files."""
+    """Look in given directory for supported configuration files.
+
+    Async friendly.
+    """
     config_path = os.path.join(config_dir, YAML_CONFIG_FILE)
 
     return config_path if os.path.isfile(config_path) else None
 
 
 def load_yaml_config_file(config_path):
-    """Parse a YAML configuration file."""
+    """Parse a YAML configuration file.
+
+    This method needs to run in an executor.
+    """
     conf_dict = load_yaml(config_path)
 
     if not isinstance(conf_dict, dict):
@@ -222,8 +230,7 @@ def load_yaml_config_file(config_path):
 def process_ha_config_upgrade(hass):
     """Upgrade config if necessary.
 
-    Asyncio don't support file operation jet.
-    This method need to run in a executor.
+    This method needs to run in an executor.
     """
     version_path = hass.config.path(VERSION_FILE)
 
@@ -254,7 +261,6 @@ def async_process_ha_core_config(hass, config):
 
     This method is a coroutine.
     """
-    # pylint: disable=too-many-branches
     config = CORE_CONFIG_SCHEMA(config)
     hac = hass.config
 

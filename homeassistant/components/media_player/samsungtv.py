@@ -27,6 +27,8 @@ DEFAULT_NAME = 'Samsung TV Remote'
 DEFAULT_PORT = 55000
 DEFAULT_TIMEOUT = 0
 
+KNOWN_DEVICES_KEY = 'samsungtv_known_devices'
+
 SUPPORT_SAMSUNGTV = SUPPORT_PAUSE | SUPPORT_VOLUME_STEP | \
     SUPPORT_VOLUME_MUTE | SUPPORT_PREVIOUS_TRACK | \
     SUPPORT_NEXT_TRACK | SUPPORT_TURN_OFF
@@ -42,27 +44,42 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 # pylint: disable=unused-argument
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the Samsung TV platform."""
-    name = config.get(CONF_NAME)
+    known_devices = hass.data.get(KNOWN_DEVICES_KEY)
+    if known_devices is None:
+        known_devices = set()
+        hass.data[KNOWN_DEVICES_KEY] = known_devices
 
-    # Generate a configuration for the Samsung library
-    remote_config = {
-        'name': 'HomeAssistant',
-        'description': config.get(CONF_NAME),
-        'id': 'ha.component.samsung',
-        'port': config.get(CONF_PORT),
-        'host': config.get(CONF_HOST),
-        'timeout': config.get(CONF_TIMEOUT),
-    }
+    # Is this a manual configuration?
+    if config.get(CONF_HOST) is not None:
+        host = config.get(CONF_HOST)
+        port = config.get(CONF_PORT)
+        name = config.get(CONF_NAME)
+        timeout = config.get(CONF_TIMEOUT)
+    elif discovery_info is not None:
+        tv_name, model, host = discovery_info
+        name = "{} ({})".format(tv_name, model)
+        port = DEFAULT_PORT
+        timeout = DEFAULT_TIMEOUT
+    else:
+        _LOGGER.warning(
+            'Internal error on samsungtv component. Cannot determine device')
+        return
 
-    add_devices([SamsungTVDevice(name, remote_config)])
+    # Only add a device once, so discovered devices do not override manual
+    # config.
+    ip_addr = socket.gethostbyname(host)
+    if ip_addr not in known_devices:
+        known_devices.add(ip_addr)
+        add_devices([SamsungTVDevice(host, port, name, timeout)])
+        _LOGGER.info("Samsung TV %s:%d added as '%s'", host, port, name)
+    else:
+        _LOGGER.info("Ignoring duplicate Samsung TV %s:%d", host, port)
 
 
-# pylint: disable=abstract-method
 class SamsungTVDevice(MediaPlayerDevice):
     """Representation of a Samsung TV."""
 
-    # pylint: disable=too-many-public-methods
-    def __init__(self, name, config):
+    def __init__(self, host, port, name, timeout):
         """Initialize the Samsung device."""
         from samsungctl import Remote
         # Save a reference to the imported class
@@ -74,7 +91,15 @@ class SamsungTVDevice(MediaPlayerDevice):
         self._playing = True
         self._state = STATE_UNKNOWN
         self._remote = None
-        self._config = config
+        # Generate a configuration for the Samsung library
+        self._config = {
+            'name': 'HomeAssistant',
+            'description': name,
+            'id': 'ha.component.samsung',
+            'port': port,
+            'host': host,
+            'timeout': timeout,
+        }
 
     def update(self):
         """Retrieve the latest data."""
@@ -101,8 +126,7 @@ class SamsungTVDevice(MediaPlayerDevice):
             self._state = STATE_ON
             self._remote = None
             return False
-        except (self._remote_class.ConnectionClosed, socket.timeout,
-                TimeoutError, OSError):
+        except (self._remote_class.ConnectionClosed, OSError):
             self._state = STATE_OFF
             self._remote = None
             return False
@@ -132,6 +156,8 @@ class SamsungTVDevice(MediaPlayerDevice):
     def turn_off(self):
         """Turn off media player."""
         self.send_key('KEY_POWEROFF')
+        # Force closing of remote session to provide instant UI feedback
+        self.get_remote().close()
 
     def volume_up(self):
         """Volume up the media player."""

@@ -1,20 +1,26 @@
 """Test the bootstrapping."""
-# pylint: disable=too-many-public-methods,protected-access
+# pylint: disable=protected-access
+import os
 from unittest import mock
 import threading
 import logging
 
 import voluptuous as vol
 
+from homeassistant.core import callback
+from homeassistant.const import EVENT_HOMEASSISTANT_START
+import homeassistant.config as config_util
 from homeassistant import bootstrap, loader
 import homeassistant.util.dt as dt_util
 from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
+from homeassistant.helpers import discovery
 
 from tests.common import \
     get_test_home_assistant, MockModule, MockPlatform, \
-    assert_setup_component, patch_yaml_files
+    assert_setup_component, patch_yaml_files, get_test_config_dir
 
 ORIG_TIMEZONE = dt_util.DEFAULT_TIME_ZONE
+VERSION_PATH = os.path.join(get_test_config_dir(), config_util.VERSION_FILE)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +32,6 @@ class TestBootstrap:
     backup_cache = None
 
     # pylint: disable=invalid-name, no-self-use
-
     def setup_method(self, method):
         """Setup the test."""
         self.backup_cache = loader._COMPONENT_CACHE
@@ -44,6 +49,8 @@ class TestBootstrap:
         dt_util.DEFAULT_TIME_ZONE = ORIG_TIMEZONE
         self.hass.stop()
         loader._COMPONENT_CACHE = self.backup_cache
+        if os.path.isfile(VERSION_PATH):
+            os.remove(VERSION_PATH)
 
     @mock.patch(
         # prevent .HA_VERISON file from being written
@@ -63,6 +70,8 @@ class TestBootstrap:
 
         with mock.patch('os.path.isfile', mock.Mock(return_value=True)), \
                 mock.patch('os.access', mock.Mock(return_value=True)), \
+                mock.patch('homeassistant.bootstrap.enable_logging',
+                           mock.Mock(return_value=True)), \
                 patch_yaml_files(files, True):
             self.hass = bootstrap.from_config_file('config.yaml')
 
@@ -279,7 +288,8 @@ class TestBootstrap:
         assert not bootstrap.setup_component(self.hass, 'comp', {})
         assert 'comp' not in self.hass.config.components
 
-    def test_home_assistant_core_config_validation(self):
+    @mock.patch('homeassistant.bootstrap.enable_logging')
+    def test_home_assistant_core_config_validation(self, log_mock):
         """Test if we pass in wrong information for HA conf."""
         # Extensive HA conf validation testing is done in test_config.py
         assert None is bootstrap.from_config_dict({
@@ -382,3 +392,48 @@ class TestBootstrap:
         assert bootstrap.setup_component(self.hass, 'disabled_component')
         assert loader.get_component('disabled_component') is not None
         assert 'disabled_component' in self.hass.config.components
+
+    def test_all_work_done_before_start(self):
+        """Test all init work done till start."""
+        call_order = []
+
+        def component1_setup(hass, config):
+            """Setup mock component."""
+            discovery.discover(hass, 'test_component2',
+                               component='test_component2')
+            discovery.discover(hass, 'test_component3',
+                               component='test_component3')
+            return True
+
+        def component_track_setup(hass, config):
+            """Setup mock component."""
+            call_order.append(1)
+            return True
+
+        loader.set_component(
+            'test_component1',
+            MockModule('test_component1', setup=component1_setup))
+
+        loader.set_component(
+            'test_component2',
+            MockModule('test_component2', setup=component_track_setup))
+
+        loader.set_component(
+            'test_component3',
+            MockModule('test_component3', setup=component_track_setup))
+
+        @callback
+        def track_start(event):
+            """Track start event."""
+            call_order.append(2)
+
+        self.hass.bus.listen_once(EVENT_HOMEASSISTANT_START, track_start)
+
+        self.hass.loop.run_until_complete = \
+            lambda _: self.hass.block_till_done()
+
+        bootstrap.from_config_dict({'test_component1': None}, self.hass)
+
+        self.hass.start()
+
+        assert call_order == [1, 1, 2]
